@@ -7,21 +7,22 @@ import archiver from "archiver";
 import { Extract } from "unzipper";
 
 // Folder Configuration
-const OUTPUT_FOLDER = "";
-const PROGRESS_FOLDER = "";
+const OUTPUT_FOLDER = "/Users/testuser/Desktop/";
+const PROGRESS_FOLDER = "/Users/testuser/Desktop/";
 
 // Configuration and Execution
-const MANGA_TITLE = "";
-const SERIES_ID = "";
+const MANGA_TITLE = "Dear-Anemone";
+const SERIES_ID = "01J76XYH27SMQGMH6NQFC9852D";
 const SERIES_URL = `https://weebcentral.com/series/${SERIES_ID}/full-chapter-list`;
 
-const VOLUME_MAPPING = {
-  1: ["Chapter 1"],
-};
+const VOLUME_MAPPING = {};
 
 class ProgressTracker {
   constructor(mangaTitle) {
-    this.progressFile = path.join(PROGRESS_FOLDER, `${mangaTitle}_progress.json`);
+    this.progressFile = path.join(
+      PROGRESS_FOLDER,
+      `${mangaTitle}_progress.json`,
+    );
     this.progress = null;
   }
 
@@ -43,7 +44,7 @@ class ProgressTracker {
     try {
       await fs.writeFile(
         this.progressFile,
-        JSON.stringify(this.progress, null, 2)
+        JSON.stringify(this.progress, null, 2),
       );
     } catch (error) {
       await logError("Failed to save progress", error);
@@ -122,10 +123,16 @@ async function ensureDir(dirPath) {
   }
 }
 
-async function downloadImage(url, filepath, retries = 3) {
+// Enhanced Utility Function for Image Download with Timeout
+async function downloadImage(url, filepath, retries = 3, timeout = 10000) {
+  // Set timeout to 10 seconds
   for (let attempt = 1; attempt <= retries; attempt++) {
+    const controller = new AbortController(); // Create an AbortController
+    const timeoutId = setTimeout(() => controller.abort(), timeout); // Start a timeout for the desired duration
+
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, { signal: controller.signal }); // Pass the signal to the fetch request
+      clearTimeout(timeoutId); // Clear the timeout if fetch succeeds
       if (!response.ok)
         throw new Error(`HTTP error! status: ${response.status}`);
       const buffer = await response.arrayBuffer();
@@ -133,9 +140,10 @@ async function downloadImage(url, filepath, retries = 3) {
       await logInfo(`Downloaded: ${filepath}`);
       return true;
     } catch (error) {
+      clearTimeout(timeoutId); // Ensure the timeout is cleared in case of an error
       await logError(
         `Attempt ${attempt}/${retries} failed to download ${url}`,
-        error
+        error,
       );
       if (attempt === retries) return false;
       await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
@@ -173,7 +181,7 @@ async function getChapterImages(chapterUrl, retries = 3) {
       await browser.close();
       await logError(
         `Attempt ${attempt}/${retries} failed to get images for chapter ${chapterUrl}`,
-        error
+        error,
       );
       if (attempt === retries) return [];
       await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
@@ -211,7 +219,7 @@ async function createCBZ(sourceDir, outputPath, comicInfo = null, retries = 3) {
     } catch (error) {
       await logError(
         `Attempt ${attempt}/${retries} failed to create CBZ ${outputPath}`,
-        error
+        error,
       );
       if (attempt === retries) return false;
       await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
@@ -226,7 +234,7 @@ async function createVolumeCBZ(
   volumeNumber,
   chapters,
   mangaTitle,
-  progressTracker
+  progressTracker,
 ) {
   if (progressTracker.isVolumeCompleted(volumeNumber)) {
     await logInfo(`Volume ${volumeNumber} already completed, skipping`);
@@ -235,7 +243,7 @@ async function createVolumeCBZ(
 
   const tempDir = path.join(
     process.cwd(),
-    `temp_volume_${volumeNumber}_${Date.now()}`
+    `temp_volume_${volumeNumber}_${Date.now()}`,
   );
   const volumeDir = path.join(process.cwd(), `${mangaTitle}_Volumes`);
 
@@ -245,6 +253,16 @@ async function createVolumeCBZ(
 
     let pageCounter = 1;
     let success = true;
+
+    // Sort chapters based on their natural order
+    const sortedChapters = chapters.sort((a, b) => {
+      const matchA = a.match(/\d+/);
+      const matchB = b.match(/\d+/);
+      return (
+        (matchA ? parseInt(matchA[0], 10) : 0) -
+        (matchB ? parseInt(matchB[0], 10) : 0)
+      );
+    });
 
     for (const chapterName of chapters) {
       try {
@@ -268,7 +286,7 @@ async function createVolumeCBZ(
             const extension = path.extname(file);
             const newPath = path.join(
               tempDir,
-              `${String(pageCounter).padStart(4, "0")}${extension}`
+              `${String(pageCounter).padStart(4, "0")}${extension}`,
             );
             await fs.rename(path.join(chapterTempDir, file), newPath);
             pageCounter++;
@@ -280,7 +298,7 @@ async function createVolumeCBZ(
         await logError(
           `Error processing chapter ${chapterName} for volume ${volumeNumber}`,
           error,
-          volumeDir
+          volumeDir,
         );
         success = false;
       }
@@ -290,7 +308,7 @@ async function createVolumeCBZ(
       const comicInfo = createVolumeComicInfo(mangaTitle, volumeNumber);
       const volumePath = path.join(
         volumeDir,
-        `${mangaTitle} Volume ${volumeNumber}.cbz`
+        `${mangaTitle} Volume ${volumeNumber}.cbz`,
       );
       success = await createCBZ(tempDir, volumePath, comicInfo);
 
@@ -298,7 +316,7 @@ async function createVolumeCBZ(
         await progressTracker.markVolumeComplete(volumeNumber);
         await logInfo(
           `Created volume ${volumeNumber} at ${volumePath}`,
-          volumeDir
+          volumeDir,
         );
       }
     }
@@ -314,7 +332,7 @@ async function createVolumeCBZ(
       await logError(
         `Error cleaning up temp directory for volume ${volumeNumber}`,
         error,
-        volumeDir
+        volumeDir,
       );
     }
   }
@@ -395,100 +413,106 @@ async function downloadManga(SERIES_URL, VOLUME_MAPPING = null) {
     let chapters = await getChapterLinks(SERIES_URL);
     await logInfo(`Found ${chapters.length} total chapters`, volumeDir);
 
-    if (VOLUME_MAPPING) {
-      for (const [volumeNumber, chapterList] of Object.entries(VOLUME_MAPPING)) {
-        if (progressTracker.isVolumeCompleted(volumeNumber)) {
+    if (!VOLUME_MAPPING || Object.keys(VOLUME_MAPPING).length === 0) {
+      // Treat all chapters as a single volume
+      const volumeNumber = 1;
+      VOLUME_MAPPING = {
+        [volumeNumber]: chapters.map((ch) => ch.name),
+      };
+    }
+
+    for (const [volumeNumber, chapterList] of Object.entries(VOLUME_MAPPING)) {
+      if (progressTracker.isVolumeCompleted(volumeNumber)) {
+        await logInfo(
+          `Volume ${volumeNumber} already completed, skipping`,
+          volumeDir,
+        );
+        continue;
+      }
+
+      await logInfo(`\nProcessing Volume ${volumeNumber}`, volumeDir);
+
+      for (const chapterName of chapterList) {
+        if (progressTracker.isChapterDownloaded(chapterName)) {
           await logInfo(
-            `Volume ${volumeNumber} already completed, skipping`,
-            volumeDir
+            `Chapter ${chapterName} already downloaded, skipping`,
+            volumeDir,
           );
           continue;
         }
 
-        await logInfo(`\nProcessing Volume ${volumeNumber}`, volumeDir);
-
-        for (const chapterName of chapterList) {
-          if (progressTracker.isChapterDownloaded(chapterName)) {
-            await logInfo(
-              `Chapter ${chapterName} already downloaded, skipping`,
-              volumeDir
-            );
-            continue;
-          }
-
-          const chapter = chapters.find((ch) => ch.name === chapterName);
-          if (!chapter) {
-            await logError(
-              `Chapter ${chapterName} not found`,
-              new Error("Chapter not found"),
-              volumeDir
-            );
-            continue;
-          }
-
-          await logInfo(`\nProcessing ${chapter.name}`, volumeDir);
-          const tempDir = path.join(baseDir, chapter.name);
-          await ensureDir(tempDir);
-
-          await logInfo(`Getting images for ${chapter.name}...`, volumeDir);
-          const images = await getChapterImages(chapter.url);
-
-          if (images.length === 0) {
-            await logError(
-              `No images found for chapter ${chapter.name}`,
-              new Error("No images found"),
-              volumeDir
-            );
-            continue;
-          }
-
-          await logInfo(
-            `Found ${images.length} images in chapter ${chapter.name}`,
-            volumeDir
+        const chapter = chapters.find((ch) => ch.name === chapterName);
+        if (!chapter) {
+          await logError(
+            `Chapter ${chapterName} not found`,
+            new Error("Chapter not found"),
+            volumeDir,
           );
-
-          let downloadSuccess = true;
-          for (const [imgIndex, imageUrl] of images.entries()) {
-            const extension = path.extname(imageUrl) || ".png";
-            const filename = `${String(imgIndex + 1).padStart(
-              3,
-              "0"
-            )}${extension}`;
-            const filepath = path.join(tempDir, filename);
-
-            if (!(await downloadImage(imageUrl, filepath))) {
-              downloadSuccess = false;
-              break;
-            }
-            await new Promise((resolve) => setTimeout(resolve, 500));
-          }
-
-          if (downloadSuccess) {
-            const comicInfo = createChapterComicInfo(
-              chapter.name,
-              volumeNumber,
-              MANGA_TITLE
-            );
-            const cbzPath = path.join(cbzDir, `${chapter.name}.cbz`);
-            if (await createCBZ(tempDir, cbzPath, comicInfo)) {
-              await progressTracker.markChapterComplete(chapter.name);
-            }
-          }
-
-          await fs.rm(tempDir, { recursive: true, force: true });
-          await logInfo(`Completed chapter ${chapter.name}`, volumeDir);
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+          continue;
         }
 
-        // Create volume CBZ after all chapters are downloaded
-        await createVolumeCBZ(
-          cbzDir,
-          volumeNumber,
-          chapterList,
-          MANGA_TITLE,
-          progressTracker
+        await logInfo(`\nProcessing ${chapter.name}`, volumeDir);
+        const tempDir = path.join(baseDir, chapter.name);
+        await ensureDir(tempDir);
+
+        await logInfo(`Getting images for ${chapter.name}...`, volumeDir);
+        const images = await getChapterImages(chapter.url);
+
+        if (images.length === 0) {
+          await logError(
+            `No images found for chapter ${chapter.name}`,
+            new Error("No images found"),
+            volumeDir,
+          );
+          continue;
+        }
+
+        await logInfo(
+          `Found ${images.length} images in chapter ${chapter.name}`,
+          volumeDir,
         );
+
+        let downloadSuccess = true;
+        for (const [imgIndex, imageUrl] of images.entries()) {
+          const extension = path.extname(imageUrl) || ".png";
+          const filename = `${String(imgIndex + 1).padStart(
+            3,
+            "0",
+          )}${extension}`;
+          const filepath = path.join(tempDir, filename);
+
+          if (!(await downloadImage(imageUrl, filepath))) {
+            downloadSuccess = false;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+
+        if (downloadSuccess) {
+          const comicInfo = createChapterComicInfo(
+            chapter.name,
+            volumeNumber,
+            MANGA_TITLE,
+          );
+          const cbzPath = path.join(cbzDir, `${chapter.name}.cbz`);
+          if (await createCBZ(tempDir, cbzPath, comicInfo)) {
+            await progressTracker.markChapterComplete(chapter.name);
+          }
+        }
+
+        await fs.rm(tempDir, { recursive: true, force: true });
+        await logInfo(`Completed chapter ${chapter.name}`, volumeDir);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
+
+      // Create volume CBZ after all chapters are downloaded
+      await createVolumeCBZ(
+        cbzDir,
+        volumeNumber,
+        chapterList,
+        MANGA_TITLE,
+        progressTracker,
+      );
     }
 
     await logInfo("\nDownload complete!", volumeDir);
