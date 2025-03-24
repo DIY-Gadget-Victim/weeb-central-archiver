@@ -6,13 +6,23 @@ import fetch from "node-fetch";
 import archiver from "archiver";
 import { Extract } from "unzipper";
 
+const args = process.argv.slice(2); // Remove the first two arguments which are node and script path
+const [SERIES_ID, MANGA_TITLE] = args;
+
+if (!SERIES_ID || !MANGA_TITLE) {
+  console.error("Series ID or Manga Title is missing!");
+  process.exit(1);
+}
+
+console.log(
+  `Inputs validated: Series ID = ${SERIES_ID}, Manga Title = ${MANGA_TITLE}`,
+);
+
 // Folder Configuration
-const OUTPUT_FOLDER = "/Users/testuser/Desktop/";
-const PROGRESS_FOLDER = "/Users/testuser/Desktop/";
+const OUTPUT_FOLDER = "/Users/usr/Desktop/Tool Scripts/Media Tools/Manga";
+const PROGRESS_FOLDER = "/Users/usr/Desktop/Tool Scripts/Media Tools/Manga";
 
 // Configuration and Execution
-const MANGA_TITLE = "Dear-Anemone";
-const SERIES_ID = "01J76XYH27SMQGMH6NQFC9852D";
 const SERIES_URL = `https://weebcentral.com/series/${SERIES_ID}/full-chapter-list`;
 
 const VOLUME_MAPPING = {};
